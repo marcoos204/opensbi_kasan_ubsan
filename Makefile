@@ -159,6 +159,12 @@ endif
 
 # Guess the compiler's XLEN
 OPENSBI_CC_XLEN := $(shell TMP=`$(CC) $(CLANG_TARGET) -dumpmachine | sed 's/riscv\([0-9][0-9]\).*/\1/'`; echo $${TMP})
+# If guessing XLEN fails, default to 64
+ifneq ($(OPENSBI_CC_XLEN),32)
+  ifneq ($(OPENSBI_CC_XLEN),64)
+    OPENSBI_CC_XLEN = 64
+  endif
+endif
 
 # Guess the compiler's ABI and ISA
 ifneq ($(CC_IS_CLANG),y)
@@ -382,6 +388,7 @@ GENFLAGS	+=	$(firmware-genflags-y)
 CFLAGS		=	-g -Wall -Werror -ffreestanding -nostdlib -fno-stack-protector -fno-strict-aliasing -ffunction-sections -fdata-sections
 CFLAGS		+=	-fno-omit-frame-pointer -fno-optimize-sibling-calls
 CFLAGS		+=	-fno-asynchronous-unwind-tables -fno-unwind-tables
+CFLAGS		+=	-std=gnull
 CFLAGS		+=	$(REPRODUCIBLE_FLAGS)
 # Optionally supported flags
 ifeq ($(CC_SUPPORT_VECTOR),y)
@@ -485,10 +492,14 @@ DTSCPPFLAGS	=	$(CPPFLAGS) -nostdinc -nostdlib -fno-builtin -D__DTS__ -x assemble
 
 ifneq ($(DEBUG),)
 CFLAGS		+=	-O0
-ELFFLAGS	+=	-Wl,--print-gc-sections
 else
 CFLAGS		+=	-O2
 endif
+
+ifeq ($(V), 1)
+ELFFLAGS       +=      -Wl,--print-gc-sections
+endif
+
 
 # Setup functions for compilation
 define dynamic_flags
