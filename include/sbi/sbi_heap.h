@@ -11,6 +11,29 @@
 #define __SBI_HEAP_H__
 
 #include <sbi/sbi_types.h>
+#ifdef KASAN_ENABLED
+#include <sbi/kasan.h>
+#else
+#include <sbi/sbi_list.h>
+#include <sbi/riscv_locks.h>
+struct heap_node {
+    struct sbi_dlist head;
+    unsigned long addr;
+    unsigned long size;
+};
+struct sbi_heap_control {
+	spinlock_t lock;
+	unsigned long base;
+	unsigned long size;
+	unsigned long resv;
+	struct sbi_dlist free_node_list;
+	struct sbi_dlist free_space_list;
+	struct sbi_dlist used_space_list;
+	struct heap_node init_free_space_node;
+};
+#endif
+#include <sbi/sbi_list.h>
+#include <sbi/riscv_locks.h>
 
 /* Opaque declaration of heap control struct */
 struct sbi_heap_control;
@@ -26,10 +49,25 @@ struct sbi_scratch;
 /** Allocate from heap area */
 void *sbi_malloc_from(struct sbi_heap_control *hpctrl, size_t size);
 
-static inline void *sbi_malloc(size_t size)
-{
+#ifdef KASAN_ENABLED 
+
+static inline void *sbi_malloc(size_t size){
+	return kasan_malloc_hook(&global_hpctrl, size); 
+}
+
+static inline void *zalloc_from (struct sbi_heap_control *hpctrl, size_t size){ //function needed for KASAn integration in compile options
+	return kasan_malloc_hook(&global_hpctrl, size);
+}
+#else 
+
+static inline void *zalloc_from (struct sbi_heap_control *hpctrl, size_t size){
 	return sbi_malloc_from(&global_hpctrl, size);
 }
+
+static inline void *sbi_malloc(size_t size){
+       return sbi_malloc_from(&global_hpctrl, size);
+}
+#endif
 
 /** Allocate aligned from heap area */
 void *sbi_aligned_alloc_from(struct sbi_heap_control *hpctrl,

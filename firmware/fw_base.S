@@ -437,14 +437,14 @@ fw_platform_init:
 	/* Map implicit memcpy() added by compiler to sbi_memcpy() */
 	.section .text
 	.align 3
-	.globl memcpy
+	.weak memcpy
 memcpy:
 	tail	sbi_memcpy
 
 	/* Map implicit memset() added by compiler to sbi_memset() */
 	.section .text
 	.align 3
-	.globl memset
+	.weak memset
 memset:
 	tail	sbi_memset
 

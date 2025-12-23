@@ -39,6 +39,13 @@
 		. = ALIGN(8);
 	}
 
+	.init_array : 
+	{
+    __global_ctors_start = .;
+    *(.init_array*)
+    __global_ctors_end = .;
+ 	}
+
 	.dynsym :
 	{
 		*(.dynsym)
@@ -61,7 +68,7 @@
 	 * regions, so ensure that the split is power-of-2.
 	 */
 	. = ALIGN(1 << LOG2CEIL((SIZEOF(.rodata) + SIZEOF(.text)
-				+ SIZEOF(.dynsym) + SIZEOF(.rela.dyn))));
+				+ SIZEOF(.dynsym) + SIZEOF(.rela.dyn) + SIZEOF(.init_array))));
 
 	PROVIDE(_fw_rw_start = .);
 
