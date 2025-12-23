@@ -497,7 +497,7 @@ CFLAGS		+=	-O2
 endif
 
 ifeq ($(V), 1)
-ELFFLAGS       +=      -Wl,--print-gc-sectionsendif
+ELFFLAGS       +=      -Wl,--print-gc-sections
 endif
 
 # Setup functions for compilation
