@@ -21,7 +21,6 @@ endif
 
 TARGET_DRAM_START := 0x80000000
 TARGET_DRAM_END := 0x8fffffff
-UART_BASE_ADDRESS := 0x10000000 #not needed
 
 KASAN_SHADOW_MAPPING_OFFSET := 0xD7000000
 KASAN_SHADOW_MEMORY_START := 0xE7000000
@@ -427,6 +426,10 @@ KASAN_CC_FLAGS += -mllvm -asan-stack=$(KASAN_SANITIZE_STACK)
 KASAN_CC_FLAGS += -mllvm -asan-globals=$(KASAN_SANITIZE_GLOBALS)
 KASAN_CC_FLAGS += -fno-sanitize-address-use-after-scope #unimplemented handler
 KASAN_CC_FLAGS += -DKASAN_ENABLED
+ifeq ($(ENABLEKASANTESTS),y) 
+KASAN_CC_FLAGS += -DKASAN_TESTS_ENABLED
+endif
+CFLAGS += $(KASAN_CC_FLAGS)
 endif
 
 
@@ -438,6 +441,10 @@ KUBSAN_CC_FLAGS += -fsanitize=implicit-signed-integer-truncation
 KUBSAN_CC_FLAGS += -fno-sanitize=function #unimplemented handler
 KUBSAN_CC_FLAGS += -fno-sanitize-link-runtime
 KUBSAN_CC_FLAGS += -DUBSAN_ENABLED
+ifeq ($(ENABLEUBSANTESTS),y) 
+KUBSAN_CC_FLAGS += -DUBSAN_TESTS_ENABLED
+endif
+CFLAGS += $(KUBSAN_CC_FLAGS)
 endif
 
 

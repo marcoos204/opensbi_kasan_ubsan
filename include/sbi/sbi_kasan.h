@@ -17,21 +17,8 @@
 #include <sbi/sbi_list.h>
 #include <sbi/riscv_locks.h>
 
-struct heap_node {
-    struct sbi_dlist head;
-    unsigned long addr;
-    unsigned long size;
-};
-struct sbi_heap_control {
-	spinlock_t lock;
-	unsigned long base;
-	unsigned long size;
-	unsigned long resv;
-	struct sbi_dlist free_node_list;
-	struct sbi_dlist free_space_list;
-	struct sbi_dlist used_space_list;
-	struct heap_node init_free_space_node;
-};
+struct heap_node;
+struct sbi_heap_control;
 
 
 
@@ -41,3 +28,8 @@ void * __kasan_memcpy(void *dst, const void *src, size_t size,
 void * __kasan_memset(void *buf, int c, size_t size, unsigned long pc);
 void *kasan_malloc_hook(struct sbi_heap_control *hpctrl, size_t size); 
 void kasan_free_hook(struct sbi_heap_control *hpctrl, void *ptr);
+extern char __global_ctors_start;
+extern char __global_ctors_end;
+
+void call_global_ctors(void);
+#endif

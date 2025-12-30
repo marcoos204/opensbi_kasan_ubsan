@@ -10,6 +10,7 @@
 #ifndef __STRING_H__
 #define __STRING_H__
 
+#include <sbi/sbi_heap.h>
 #include <sbi/sbi_types.h>
 
 /*
@@ -27,15 +28,19 @@ size_t sbi_strnlen(const char *str, size_t count);
 
 char *sbi_strcpy(char *dest, const char *src);
 
+void *sbi_memset(void *s, int c, size_t count);
+
+void *sbi_memcpy(void *dest, const void *src, size_t count);
+
+void *_real_sbi_memset(void *s, int c, size_t count);
+
+void *_real_sbi_memcpy(void *dest, const void *src, size_t count);
+
 char *sbi_strncpy(char *dest, const char *src, size_t count);
 
 char *sbi_strchr(const char *s, int c);
 
 char *sbi_strrchr(const char *s, int c);
-
-void *sbi_memset(void *s, int c, size_t count);
-
-void *sbi_memcpy(void *dest, const void *src, size_t count);
 
 void *sbi_memmove(void *dest, const void *src, size_t count);
 

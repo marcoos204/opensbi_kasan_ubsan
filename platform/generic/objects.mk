@@ -37,7 +37,10 @@ ifeq ($(PLATFORM_RISCV_XLEN), 32)
   # This needs to be 4MB aligned for 32-bit system
   FW_PAYLOAD_OFFSET=0x400000
 else
-  # This needs to be 2MB aligned for 64-bit system
+  ifeq ($(ENABLEKASAN),y)   # This needs to be 2MB aligned for 64-bit system: we double the size for KASAn and UBSAn integration
+  FW_PAYLOAD_OFFSET=0x400000
+  else
   FW_PAYLOAD_OFFSET=0x200000
+  endif
 endif
 FW_PAYLOAD_FDT_OFFSET=$(FW_JUMP_FDT_OFFSET)

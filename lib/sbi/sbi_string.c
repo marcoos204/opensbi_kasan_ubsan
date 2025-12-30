@@ -14,6 +14,7 @@
 
 #include <sbi/sbi_string.h>
 
+#define CALLER_PC ((unsigned long)__builtin_return_address(0))
 /*
   Provides sbi_strcmp for the completeness of supporting string functions.
   it is not recommended to use sbi_strcmp() but use sbi_strncmp instead.
@@ -109,7 +110,9 @@ char *sbi_strrchr(const char *s, int c)
 	else
 		return (char *)last;
 }
-void *sbi_memset(void *s, int c, size_t count)
+
+__attribute__((no_sanitize("address")))
+void *_real_sbi_memset(void *s, int c, size_t count)
 {
 	char *temp = s;
 
@@ -121,8 +124,8 @@ void *sbi_memset(void *s, int c, size_t count)
 	return s;
 }
 
-void *sbi_memcpy(void *dest, const void *src, size_t count)
-{
+__attribute__((no_sanitize("address")))
+void *_real_sbi_memcpy(void *dest, const void *src, size_t count){
 	char *temp1	  = dest;
 	const char *temp2 = src;
 
@@ -134,6 +137,29 @@ void *sbi_memcpy(void *dest, const void *src, size_t count)
 	return dest;
 }
 
+
+__attribute__((no_sanitize("address")))
+void *sbi_memset(void *s, int c, unsigned long count) {
+    #ifdef KASAN_ENABLED
+    return __kasan_memset(s, c, count, CALLER_PC);
+    //addedd from SBI
+    #else
+    return _real_sbi_memset(s, c, count);
+    #endif
+}
+
+__attribute__((no_sanitize("address")))
+void *sbi_memcpy(void *dest, const void *src, unsigned long count) {
+    #ifdef KASAN_ENABLED
+    return __kasan_memcpy(dest, src, count, CALLER_PC);
+    //addedd from SBI
+    #else
+    return _real_sbi_memcpy(dest, src, count);
+    #endif
+}
+
+
+__attribute__((no_sanitize("address")))
 void *sbi_memmove(void *dest, const void *src, size_t count)
 {
 	char *temp1	  = (char *)dest;
@@ -160,6 +186,7 @@ void *sbi_memmove(void *dest, const void *src, size_t count)
 	return dest;
 }
 
+__attribute__((no_sanitize("address")))
 int sbi_memcmp(const void *s1, const void *s2, size_t count)
 {
 	const char *temp1 = s1;
@@ -188,4 +215,26 @@ void *sbi_memchr(const void *s, int c, size_t count)
 	}
 
 	return NULL;
+}
+
+__attribute__((no_sanitize("address")))
+void *memset(void *s, int c, size_t count)
+{
+    #ifdef KASAN_ENABLED
+    return __kasan_memset(s, c, count, CALLER_PC);
+    //addedd from SBI
+    #else
+    return _real_sbi_memset(s, c, count);
+    #endif
+}
+
+__attribute__((no_sanitize("address")))
+void *memcpy(void *dest, const void *src, size_t count)
+{
+    #ifdef KASAN_ENABLED
+    return __kasan_memcpy(dest, src, count, CALLER_PC);
+    //addedd from SBI
+    #else
+    return _real_sbi_memcpy(dest, src, count);
+    #endif
 }

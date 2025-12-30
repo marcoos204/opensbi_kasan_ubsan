@@ -137,11 +137,13 @@ out:
 	return ret;
 }
 
+__attribute__((no_sanitize("address")))
 void *sbi_malloc_from(struct sbi_heap_control *hpctrl, size_t size)
 {
 	return alloc_with_align(hpctrl, HEAP_ALLOC_ALIGN, size);
 }
 
+__attribute__((no_sanitize("address")))
 void *sbi_aligned_alloc_from(struct sbi_heap_control *hpctrl,
 			     size_t alignment, size_t size)
 {
@@ -159,9 +161,10 @@ void *sbi_aligned_alloc_from(struct sbi_heap_control *hpctrl,
 	return alloc_with_align(hpctrl, alignment, size);
 }
 
+__attribute__((no_sanitize("address")))
 void *sbi_zalloc_from(struct sbi_heap_control *hpctrl, size_t size)
 {
-	void *ret = sbi_malloc_from(hpctrl, size);
+	void *ret = zalloc_from(hpctrl, size); //function needed for KASAn integration in compile options
 
 	if (ret)
 		sbi_memset(ret, 0, size);

@@ -64,6 +64,11 @@ libsbi-objs-$(CONFIG_SBI_ECALL_SSE) += sbi_ecall_sse.o
 carray-sbi_ecall_exts-$(CONFIG_SBI_ECALL_MPXY) += ecall_mpxy
 libsbi-objs-$(CONFIG_SBI_ECALL_MPXY) += sbi_ecall_mpxy.o
 
+
+libsbi-objs-y += sbi_kasan.o
+libsbi-objs-y += sbi_ubsan.o
+libsbi-objs-y += sbi_kasan_test.o
+libsbi-objs-y += sbi_ubsan_test.o
 libsbi-objs-y += sbi_bitmap.o
 libsbi-objs-y += sbi_bitops.o
 libsbi-objs-y += sbi_console.o

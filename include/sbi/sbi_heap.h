@@ -12,25 +12,10 @@
 
 #include <sbi/sbi_types.h>
 #ifdef KASAN_ENABLED
-#include <sbi/kasan.h>
+#include <sbi/sbi_kasan.h>
 #else
 #include <sbi/sbi_list.h>
 #include <sbi/riscv_locks.h>
-struct heap_node {
-    struct sbi_dlist head;
-    unsigned long addr;
-    unsigned long size;
-};
-struct sbi_heap_control {
-	spinlock_t lock;
-	unsigned long base;
-	unsigned long size;
-	unsigned long resv;
-	struct sbi_dlist free_node_list;
-	struct sbi_dlist free_space_list;
-	struct sbi_dlist used_space_list;
-	struct heap_node init_free_space_node;
-};
 #endif
 #include <sbi/sbi_list.h>
 #include <sbi/riscv_locks.h>
