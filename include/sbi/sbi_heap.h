@@ -11,12 +11,7 @@
 #define __SBI_HEAP_H__
 
 #include <sbi/sbi_types.h>
-#ifdef KASAN_ENABLED
 #include <sbi/sbi_kasan.h>
-#else
-#include <sbi/sbi_list.h>
-#include <sbi/riscv_locks.h>
-#endif
 #include <sbi/sbi_list.h>
 #include <sbi/riscv_locks.h>
 

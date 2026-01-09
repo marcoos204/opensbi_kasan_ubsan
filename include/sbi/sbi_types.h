@@ -14,8 +14,6 @@
 
 /* clang-format off */
 
-//KASAN added types
-
 typedef int 			int8_t;
 typedef signed char		s8;
 typedef unsigned char		u8;

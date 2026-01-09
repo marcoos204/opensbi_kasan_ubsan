@@ -62,17 +62,17 @@ static inline unsigned long get_poisoned_shadow_address(unsigned long addr,
     unsigned long last_byte = addr + size - 1;
     s8 *last_shadow_byte = (s8 *)KASAN_MEM_TO_SHADOW(last_byte);
 
-    // Non-zero bytes in shadow memory may indicate either:
-    //  1) invalid memory access (0xff, 0xfa, ...)
-    //  2) access to a 8-byte region which isn't entirely accessible, i.e. only
-    //     n bytes can be read/written in the 8-byte region, where n < 8
-    //     (in this case shadow byte encodes how much bytes in an 8-byte region
-    //     are accessible).
-    // Thus, if there is a non-zero shadow byte we need to check if it
-    // corresponds to the last byte in the checked region:
-    //   not last - OOB memory access
-    //   last - check if we don't access beyond what's encoded in the shadow
-    //          byte.
+    /* Non-zero bytes in shadow memory may indicate either:
+    *  1) invalid memory access (0xff, 0xfa, ...)
+    *  2) access to a 8-byte region which isn't entirely accessible, i.e. only
+    *     n bytes can be read/written in the 8-byte region, where n < 8
+    *     (in this case shadow byte encodes how much bytes in an 8-byte region
+    *     are accessible).
+    * Thus, if there is a non-zero shadow byte we need to check if it
+    * corresponds to the last byte in the checked region:
+    *   not last - OOB memory access
+    *   last - check if we don't access beyond what's encoded in the shadow byte.
+    */         
     if (non_zero_shadow_addr != (unsigned long)last_shadow_byte || ((s8)(last_byte & KASAN_SHADOW_MASK) >= *last_shadow_byte)) // (((((addr_shadow_end - addr_shadow_start) + 1) * 8) - (7 - *last_shadow_byte)) < size))
      { 
       return non_zero_shadow_addr;
