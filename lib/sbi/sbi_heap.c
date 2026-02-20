@@ -39,6 +39,7 @@ struct sbi_heap_control {
 
 struct sbi_heap_control global_hpctrl;
 
+__attribute__((no_sanitize("address")))
 static bool alloc_nodes(struct sbi_heap_control *hpctrl)
 {
 	size_t size = HEAP_NODE_BATCH_SIZE * sizeof(struct heap_node);
@@ -69,6 +70,7 @@ static bool alloc_nodes(struct sbi_heap_control *hpctrl)
 	return true;
 }
 
+__attribute__((no_sanitize("address")))
 static void *alloc_with_align(struct sbi_heap_control *hpctrl,
 			      size_t align, size_t size)
 {
@@ -164,13 +166,14 @@ void *sbi_aligned_alloc_from(struct sbi_heap_control *hpctrl,
 __attribute__((no_sanitize("address")))
 void *sbi_zalloc_from(struct sbi_heap_control *hpctrl, size_t size)
 {
-	void *ret = zalloc_from(hpctrl, size); //function needed for KASAn integration in compile options
+	void *ret = zalloc_from(hpctrl, size); //function needed for KASAn integration
 
 	if (ret)
 		sbi_memset(ret, 0, size);
 	return ret;
 }
 
+__attribute__((no_sanitize("address")))
 void sbi_free_from(struct sbi_heap_control *hpctrl, void *ptr)
 {
 	struct heap_node *n, *np;
@@ -242,6 +245,7 @@ unsigned long sbi_heap_reserved_space_from(struct sbi_heap_control *hpctrl)
 	return hpctrl->resv;
 }
 
+__attribute__((no_sanitize("address")))
 int sbi_heap_init_new(struct sbi_heap_control *hpctrl, unsigned long base,
 		       unsigned long size)
 {

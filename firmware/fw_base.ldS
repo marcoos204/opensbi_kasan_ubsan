@@ -39,7 +39,7 @@
 		. = ALIGN(8);
 	}
 
-	.init_array : 
+	.init_array : /* Needed for KASan - NetBSD style */
 	{
     __CTOR_LIST__ = .;
     *(.init_array*)

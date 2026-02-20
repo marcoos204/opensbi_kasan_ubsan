@@ -36,7 +36,7 @@ static inline void *sbi_malloc(size_t size){
 }
 
 static inline void *zalloc_from (struct sbi_heap_control *hpctrl, size_t size){ //function needed for KASAn integration in compile options
-	return kasan_malloc_hook(&global_hpctrl, size);
+	return kasan_malloc_hook(hpctrl, size);
 }
 #else 
 

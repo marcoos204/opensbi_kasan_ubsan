@@ -99,7 +99,6 @@ static inline bool kasan_md_illegal(unsigned long addr, bool is_write) {
 
 }
 
-
 __attribute__((no_sanitize("address")))
 static inline bool kasan_md_unsupported(unsigned long addr) {
     if (addr > kasan_fw_end) return true;
@@ -108,7 +107,6 @@ static inline bool kasan_md_unsupported(unsigned long addr) {
 
     return false;
 }
-
 
 __attribute__((no_sanitize("address")))
 static inline const char *kasan_code_name(uint8_t code) {
@@ -137,7 +135,6 @@ static void kasan_report(unsigned long addr, size_t size, bool write, unsigned l
         
     sbi_scratch_write_type(scratch, bool, kasan_enabled_offset, was_enabled);
 }
-
 
 __attribute__((no_sanitize("address")))
 static inline bool kasan_shadow_1byte_isvalid(unsigned long addr, uint8_t *code) {
@@ -392,8 +389,6 @@ __attribute__((no_sanitize("address"))) void __asan_storeN_noabort(unsigned long
     kasan_shadow_check(addr, size, true, __RET_ADDR);
 }
 __attribute__((no_sanitize("address"))) void __asan_handle_no_return(void) {}
-
-// 8. GLOBALS
 
 struct __asan_global {
     const void *beg;
