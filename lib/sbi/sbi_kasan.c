@@ -66,7 +66,8 @@
 #define KASAN_MEM_TO_SHADOW(addr) \
   (((addr) >> KASAN_SHADOW_SCALE_SHIFT) + __asan_shadow_memory_dynamic_address)
 
-static bool kasan_enabled = false;
+static unsigned long kasan_enabled_offset;
+static bool kasan_early_boot_done = false;
 static unsigned long kasan_fw_base;
 static unsigned long kasan_rw_offset;
 static unsigned long kasan_fw_size;
@@ -125,15 +126,16 @@ static inline const char *kasan_code_name(uint8_t code) {
 
 __attribute__((no_sanitize("address")))
 static void kasan_report(unsigned long addr, size_t size, bool write, unsigned long pc, uint8_t code) {
-    bool was_enabled = kasan_enabled;
-    kasan_enabled = false;
+    struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+    bool was_enabled = sbi_scratch_read_type(scratch, bool, kasan_enabled_offset);
+    sbi_scratch_write_type(scratch, bool, kasan_enabled_offset, false);
 
     sbi_printf("\n");
     sbi_printf("ASan: Unauthorized Access In %p: Addr %p [%lu byte%s, %s, %s]\n",
         (void *)pc, (void *)addr, (unsigned long)size, (size > 1 ? "s" : ""),
         (write ? "write" : "read"), kasan_code_name(code));
         
-    kasan_enabled = was_enabled;
+    sbi_scratch_write_type(scratch, bool, kasan_enabled_offset, was_enabled);
 }
 
 
@@ -208,10 +210,15 @@ static inline bool kasan_shadow_Nbyte_isvalid(unsigned long addr, size_t size, u
 
 __attribute__((no_sanitize("address")))
 void kasan_shadow_check(unsigned long addr, size_t size, bool write, unsigned long retaddr) {
+    
+    if (__predict_false(!kasan_early_boot_done)) return;
+    
     uint8_t code = 0;
     bool valid = true;
-
-    if (__predict_false(!kasan_enabled)) return;
+    struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+    bool enabled = sbi_scratch_read_type(scratch, bool, kasan_enabled_offset);
+    if (__predict_false(!enabled)) return;
+    
     if (__predict_false(size == 0)) return;
     if (__predict_false(kasan_md_illegal(addr, write))) {
         kasan_report(addr, size, write, retaddr, KASAN_SHADOW_RESERVED);
@@ -288,6 +295,7 @@ void kasan_mark(const void *addr, size_t size, size_t sz_with_redz, uint8_t code
     size_t i, n, redz;
     int8_t *shad;
 
+    if (__predict_false(!kasan_early_boot_done)) return;
     if (kasan_md_unsupported((unsigned long)addr)) return;
 
     redz = sz_with_redz - roundup(size, KASAN_SHADOW_SCALE_SIZE);
@@ -310,7 +318,11 @@ void kasan_mark(const void *addr, size_t size, size_t sz_with_redz, uint8_t code
         *shad++ = code;
     }
 }
-
+__attribute__((no_sanitize("address")))
+void kasan_hart_init(struct sbi_scratch *scratch)
+{
+    sbi_scratch_write_type(scratch, bool, kasan_enabled_offset, true);
+}
 
 __attribute__((no_sanitize("address")))
 void kasan_md_init(struct sbi_scratch *scratch) 
@@ -324,8 +336,8 @@ void kasan_md_init(struct sbi_scratch *scratch)
     kasan_shadow_size = (kasan_fw_end - kasan_fw_start + 1) >> KASAN_SHADOW_SCALE_SHIFT;
 
     _real_sbi_memset((void*)KASAN_SHADOW_MEMORY_START, 0, kasan_shadow_size);
-   
-    kasan_enabled = true;
+
+    kasan_enabled_offset = sbi_scratch_alloc_offset(sizeof(bool));
 }
 
 __attribute__((no_sanitize("address")))
@@ -487,7 +499,21 @@ void __asan_unpoison_stack_memory(const void *addr, size_t size) {
 __attribute__((no_sanitize("address"))) 
 void kasan_init(struct sbi_scratch *scratch) {
     kasan_md_init(scratch);
+    kasan_early_boot_done = true;
     kasan_ctors();
+    kasan_hart_init(scratch);
+}
+
+__attribute__((no_sanitize("address")))
+void sbi_kasan_get_shadow_region(struct sbi_domain_memregion *reg)
+{
+    sbi_domain_memregion_init(KASAN_SHADOW_MEMORY_START, kasan_shadow_size, 0, reg);
+}
+
+__attribute__((no_sanitize("address")))
+unsigned long sbi_kasan_get_shadow_size(void)
+{
+    return kasan_shadow_size;
 }
 
 #endif

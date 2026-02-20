@@ -1,3 +1,8 @@
+/* 
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Author: Marcos Oduardo <marcos.oduardo@gmail.com>
+ */
+
 #ifndef __SBI_KASAN_TEST_H__
 #define __SBI_KASAN_TEST_H__
 

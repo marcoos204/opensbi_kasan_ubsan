@@ -445,6 +445,10 @@ static void __noreturn init_warm_startup(struct sbi_scratch *scratch,
 	rc = sbi_hart_init(scratch, false);
 	if (rc)
 		sbi_hart_hang();
+	
+	#ifdef KASAN_ENABLED
+    kasan_hart_init(scratch);
+    #endif
 
 	rc = sbi_pmu_init(scratch, false);
 	if (rc)

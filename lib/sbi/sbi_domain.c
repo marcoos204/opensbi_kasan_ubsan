@@ -18,6 +18,7 @@
 #include <sbi/sbi_platform.h>
 #include <sbi/sbi_scratch.h>
 #include <sbi/sbi_string.h>
+#include <sbi/sbi_kasan.h>
 
 SBI_LIST_HEAD(domain_list);
 
@@ -946,7 +947,20 @@ int sbi_domain_init(struct sbi_scratch *scratch, u32 cold_hartid)
 					   SBI_DOMAIN_MEMREGION_M_WRITABLE |
 					   SBI_DOMAIN_MEMREGION_FW),
 					  &root_memregs[root_memregs_count++]);
+		
 	}
+
+	#ifdef KASAN_ENABLED
+	/*
+	 * Protect KASAN Shadowmap memregion from lower privilege modes
+	 */
+    sbi_domain_memregion_init(KASAN_SHADOW_MEMORY_START,
+                  sbi_kasan_get_shadow_size(),
+                  (SBI_DOMAIN_MEMREGION_M_READABLE |
+                   SBI_DOMAIN_MEMREGION_M_WRITABLE |
+                   SBI_DOMAIN_MEMREGION_FW),
+                  &root_memregs[root_memregs_count++]);
+	#endif
 
 	root.fw_region_inited = true;
 
@@ -977,7 +991,7 @@ int sbi_domain_init(struct sbi_scratch *scratch, u32 cold_hartid)
 	/* Root domain possible and assigned HARTs */
 	sbi_for_each_hartindex(i)
 		sbi_hartmask_set_hartindex(i, root_hmask);
-
+		
 	/* Finally register the root domain */
 	rc = sbi_domain_register(&root, root_hmask);
 	if (rc)

@@ -31,11 +31,11 @@ char *sbi_strcpy(char *dest, const char *src);
 void *sbi_memset(void *s, int c, size_t count);
 
 void *sbi_memcpy(void *dest, const void *src, size_t count);
-
+#ifdef KASAN_ENABLED
 void *_real_sbi_memset(void *s, int c, size_t count);
 
 void *_real_sbi_memcpy(void *dest, const void *src, size_t count);
-
+#endif
 char *sbi_strncpy(char *dest, const char *src, size_t count);
 
 char *sbi_strchr(const char *s, int c);

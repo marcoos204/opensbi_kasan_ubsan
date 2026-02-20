@@ -1,3 +1,8 @@
+/* 
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Author: Marcos Oduardo <marcos.oduardo@gmail.com>
+ */
+
 #ifdef KASAN_TESTS_ENABLED
 #include <sbi/sbi_kasan_test.h>
 #pragma GCC diagnostic push

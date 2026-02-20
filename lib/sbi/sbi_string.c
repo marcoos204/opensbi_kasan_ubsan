@@ -271,33 +271,17 @@ void *sbi_memchr(const void *s, int c, size_t count)
 __attribute__((no_sanitize("address")))
 void *memset(void *s, int c, size_t count)
 {
-    #ifdef KASAN_ENABLED
-    kasan_shadow_check((unsigned long)s, count, true, __RET_ADDR);
-    #endif
-    char *temp = s;
-
-    while (count > 0) {
-        count--;
-        *temp++ = c;
-    }
-
-    return s;
+    return sbi_memset(s, c, count);
 }
 
 __attribute__((no_sanitize("address")))
 void *memcpy(void *dest, const void *src, size_t count)
 {
-    #ifdef KASAN_ENABLED
-    kasan_shadow_check((unsigned long)src, count, false, __RET_ADDR);
-    kasan_shadow_check((unsigned long)dest, count, true, __RET_ADDR); 
-    #endif
-    char *temp1   = dest;
-    const char *temp2 = src;
+    return sbi_memcpy(dest, src, count);
+}
 
-    while (count > 0) {
-        *temp1++ = *temp2++;
-        count--;
-    }
-
-    return dest;
+__attribute__((no_sanitize("address")))
+void *memmove(void *dest, const void *src, size_t count)
+{
+    return sbi_memmove(dest, src, count);
 }
