@@ -36,10 +36,7 @@
 #include <sbi/sbi_version.h>
 #include <sbi/sbi_unit_test.h>
 #include <sbi/sbi_kasan.h>
-#include <sbi/sbi_ubsan.h>
 #include <sbi/sbi_kasan_test.h>
-#include <sbi/sbi_ubsan_test.h>
-
 
 #define BANNER                                              \
 	"   ____                    _____ ____ _____\n"     \
@@ -238,8 +235,7 @@ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
 		sbi_hart_hang();
 	
 	#ifdef KASAN_ENABLED
-	call_global_ctors();
-    initialize_kasan();
+	kasan_init(scratch);
 	#endif
 
 	/* Note: This has to be second thing in coldboot init sequence */
@@ -299,26 +295,11 @@ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
 	sbi_double_trap_init(scratch);
 
 	#ifdef KASAN_TESTS_ENABLED
-
-	test_heap_overflow();
-    test_stack_overflow();
-    test_globals_overflow();
-    test_memset_overflow();
-    test_memcpy_overflow();
-
-	#endif
-
-	#ifdef UBSAN_TESTS_ENABLED
-
-    test_ubsan_add_overflow();
-	test_ubsan_sub_overflow();
-	test_ubsan_mul_overflow();
-	test_ubsan_negate_overflow();
-    test_ubsan_divrem_overflow();
-	test_ubsan_truncate_signed();
-	test_ubsan_shift_out_of_bounds();
-	test_ubsan_out_of_bounds();
-	
+	heap_kasan_test();
+    stack_kasan_test();
+    globals_kasan_test();
+    memset_kasan_test();
+    memcpy_kasan_test();
 	#endif
 
 	rc = sbi_irqchip_init(scratch, true);

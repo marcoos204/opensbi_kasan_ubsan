@@ -15,10 +15,10 @@ extern char __global_ctors_start;
 extern char __global_ctors_end;
 
 void call_global_ctors(void);
-void test_heap_overflow(void);
-void test_stack_overflow(void);
-void test_globals_overflow(void);
-void test_memset_overflow(void);
-void test_memcpy_overflow(void);
+void heap_kasan_test(void);
+void stack_kasan_test(void);
+void globals_kasan_test(void);
+void memset_kasan_test(void);
+void memcpy_kasan_test(void);
 #endif
 #endif

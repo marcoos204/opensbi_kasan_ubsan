@@ -19,13 +19,6 @@ else
 READLINK ?= readlink
 endif
 
-TARGET_DRAM_START := 0x80000000
-TARGET_DRAM_END := 0x8fffffff
-
-KASAN_SHADOW_MAPPING_OFFSET := 0xD7000000
-KASAN_SHADOW_MEMORY_START := 0xE7000000
-KASAN_SHADOW_MEMORY_SIZE := 0x2000000
-
 # Find out source, build, and install directories
 src_dir=$(CURDIR)
 ifdef O
@@ -409,42 +402,26 @@ CFLAGS		+=	$(firmware-cflags-y)
 
 
 #KASAN Cflags
-ifeq ($(ENABLEKASAN),y) 
-CFLAGS += -DTARGET_ARCH_$(ARCH)
-CFLAGS += -DKASAN_SHADOW_MAPPING_OFFSET=$(KASAN_SHADOW_MAPPING_OFFSET)
-CFLAGS += -DKASAN_SHADOW_MEMORY_START=$(KASAN_SHADOW_MEMORY_START)
-CFLAGS += -DKASAN_SHADOW_MEMORY_SIZE=$(KASAN_SHADOW_MEMORY_SIZE)
-CFLAGS += -DTARGET_DRAM_START=$(TARGET_DRAM_START)
-CFLAGS += -DTARGET_DRAM_END=$(TARGET_DRAM_END)
-# KASan-specific compiler options
-KASAN_SANITIZE_STACK := 1
-KASAN_SANITIZE_GLOBALS := 1
-KASAN_CC_FLAGS += -fsanitize=kernel-address
-KASAN_CC_FLAGS += -mllvm -asan-mapping-offset=$(KASAN_SHADOW_MAPPING_OFFSET)
-KASAN_CC_FLAGS += -mllvm -asan-instrumentation-with-call-threshold=0
-KASAN_CC_FLAGS += -mllvm -asan-stack=$(KASAN_SANITIZE_STACK)
-KASAN_CC_FLAGS += -mllvm -asan-globals=$(KASAN_SANITIZE_GLOBALS)
-KASAN_CC_FLAGS += -fno-sanitize-address-use-after-scope #unimplemented handler
-KASAN_CC_FLAGS += -DKASAN_ENABLED
-ifeq ($(ENABLEKASANTESTS),y) 
-KASAN_CC_FLAGS += -DKASAN_TESTS_ENABLED
-endif
-CFLAGS += $(KASAN_CC_FLAGS)
-endif
 
-
-ifeq ($(ENABLEUBSAN),y) 
-#UBsan-specific compiler options
-KUBSAN_CC_FLAGS := -fsanitize=undefined
-KUBSAN_CC_FLAGS += -fno-sanitize=pointer-overflow #unimplemented handler
-KUBSAN_CC_FLAGS += -fsanitize=implicit-signed-integer-truncation
-KUBSAN_CC_FLAGS += -fno-sanitize=function #unimplemented handler
-KUBSAN_CC_FLAGS += -fno-sanitize-link-runtime
-KUBSAN_CC_FLAGS += -DUBSAN_ENABLED
-ifeq ($(ENABLEUBSANTESTS),y) 
-KUBSAN_CC_FLAGS += -DUBSAN_TESTS_ENABLED
-endif
-CFLAGS += $(KUBSAN_CC_FLAGS)
+ifeq ($(ENABLEKASAN),y)
+	KASAN_SHADOW_MEMORY_START := 0x80100000
+    CFLAGS += -DTARGET_ARCH_$(ARCH)
+    CFLAGS += -DKASAN_SHADOW_MEMORY_START=$(KASAN_SHADOW_MEMORY_START)
+    ifeq ($(CC_IS_CLANG),y)
+        KASAN_FLAGS := -fsanitize=kernel-address 
+        KASAN_FLAGS += -fno-sanitize-address-use-after-scope
+        KASAN_FLAGS += -DKASAN_ENABLED
+        KASAN_FLAGS += -fsanitize-ignorelist=$(CURDIR)/kasan_ignore.txt
+        KASAN_FLAGS += -mllvm -asan-instrumentation-with-call-threshold=0
+        KASAN_FLAGS += -mllvm -asan-stack=1
+        KASAN_FLAGS += -mllvm -asan-globals=1        
+        ifeq ($(ENABLEKASANTESTS),y) 
+            KASAN_FLAGS += -DKASAN_TESTS_ENABLED
+        endif
+        CFLAGS += $(KASAN_FLAGS)
+    else
+        $(error OpenSBI KASAN currently requires Clang because GCC is unsupported. Please build with LLVM=y)
+    endif
 endif
 
 

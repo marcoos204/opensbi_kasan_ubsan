@@ -1,0 +1,14 @@
+src:*sbi_init.c
+src:*sbi_domain_context.c
+src:*sbi_scratch.c
+src:*sbi_hart.c
+src:*sbi_trap.c
+src:*sbi_console.c
+src:*sbi_kasan.c
+
+src:*sbi_string.c
+
+src:*fdt*.c
+
+src:*platform.c
+src:*fw_base.S

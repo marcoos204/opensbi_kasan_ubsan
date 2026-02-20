@@ -45,7 +45,7 @@ static inline void *zalloc_from (struct sbi_heap_control *hpctrl, size_t size){
 }
 
 static inline void *sbi_malloc(size_t size){
-       return sbi_malloc_from(&global_hpctrl, size);
+    return sbi_malloc_from(&global_hpctrl, size);
 }
 #endif
 
@@ -81,11 +81,19 @@ static inline void *sbi_calloc_from(struct sbi_heap_control *hpctrl,
 /** Free-up to heap area */
 void sbi_free_from(struct sbi_heap_control *hpctrl, void *ptr);
 
+#ifdef KASAN_ENABLED 
+static inline void sbi_free(void *ptr)
+{
+	return kasan_free_hook(&global_hpctrl, ptr);
+}
+
+#else
 static inline void sbi_free(void *ptr)
 {
 	return sbi_free_from(&global_hpctrl, ptr);
 }
 
+#endif
 /** Amount (in bytes) of free space in the heap area */
 unsigned long sbi_heap_free_space_from(struct sbi_heap_control *hpctrl);
 

@@ -41,9 +41,9 @@
 
 	.init_array : 
 	{
-    __global_ctors_start = .;
+    __CTOR_LIST__ = .;
     *(.init_array*)
-    __global_ctors_end = .;
+    __CTOR_END__ = .;
  	}
 
 	.dynsym :

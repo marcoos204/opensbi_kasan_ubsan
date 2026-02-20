@@ -65,10 +65,6 @@ carray-sbi_ecall_exts-$(CONFIG_SBI_ECALL_MPXY) += ecall_mpxy
 libsbi-objs-$(CONFIG_SBI_ECALL_MPXY) += sbi_ecall_mpxy.o
 
 
-libsbi-objs-y += sbi_kasan.o
-libsbi-objs-y += sbi_ubsan.o
-libsbi-objs-y += sbi_kasan_test.o
-libsbi-objs-y += sbi_ubsan_test.o
 libsbi-objs-y += sbi_bitmap.o
 libsbi-objs-y += sbi_bitops.o
 libsbi-objs-y += sbi_console.o
@@ -91,6 +87,8 @@ libsbi-objs-y += sbi_illegal_insn.o
 libsbi-objs-y += sbi_init.o
 libsbi-objs-y += sbi_ipi.o
 libsbi-objs-y += sbi_irqchip.o
+libsbi-objs-y += sbi_kasan.o
+libsbi-objs-y += sbi_kasan_test.o
 libsbi-objs-y += sbi_platform.o
 libsbi-objs-y += sbi_pmu.o
 libsbi-objs-y += sbi_dbtr.o

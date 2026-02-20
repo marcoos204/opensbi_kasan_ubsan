@@ -1,343 +1,493 @@
-/*
- * Copyright 2024 Google LLC
+
+/* SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2018-2020 Maxime Villard, m00nbsd.net
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
+ * Author: Marcos Oduardo <marcos.oduardo@gmail.com>
+ *               
+ * All rights reserved.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * This code is part of the KASAN subsystem of the NetBSD kernel.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  */
 
-
-#ifdef KASAN_ENABLED
-
+#include <sbi/sbi_kasan.h>
 #include <sbi/sbi_console.h>
 #include <sbi/sbi_heap.h>
 #include <sbi/sbi_string.h>
+#include <sbi/sbi_types.h>
+#include <sbi/sbi_scratch.h>
 
-#define CALLER_PC ((unsigned long)__builtin_return_address(0))
+#ifdef KASAN_ENABLED
 
-#define KASAN_SHADOW_SHIFT 3 
-#define KASAN_SHADOW_GRANULE_SIZE (1UL << KASAN_SHADOW_SHIFT) //8
-#define KASAN_SHADOW_MASK (KASAN_SHADOW_GRANULE_SIZE - 1)
+#define __RET_ADDR ((unsigned long) __builtin_return_address(0))
 
-#define ASAN_SHADOW_UNPOISONED_MAGIC 0x00
-#define ASAN_SHADOW_RESERVED_MAGIC 0xff
-#define ASAN_SHADOW_GLOBAL_REDZONE_MAGIC 0xf9
-#define ASAN_SHADOW_HEAP_HEAD_REDZONE_MAGIC 0xfa
-#define ASAN_SHADOW_HEAP_TAIL_REDZONE_MAGIC 0xfb
-#define ASAN_SHADOW_HEAP_FREE_MAGIC 0xfd
+/* ASAN constants. Part of the compiler ABI. */
+#define KASAN_SHADOW_SCALE_SHIFT    3
+#define KASAN_SHADOW_SCALE_SIZE     (1UL << KASAN_SHADOW_SCALE_SHIFT)
+#define KASAN_SHADOW_MASK           (KASAN_SHADOW_SCALE_SIZE - 1)
 
-#define KASAN_HEAP_HEAD_REDZONE_SIZE 0x20 
-#define KASAN_HEAP_TAIL_REDZONE_SIZE 0x20 
+// Poison Values
+#define KASAN_GENERIC_REDZONE   0xFA
+#define KASAN_MALLOC_REDZONE    0xFB
+#define KASAN_HEAP_FREE         0xFD
+#define KASAN_STACK_LEFT        0xF1
+#define KASAN_STACK_MID         0xF2
+#define KASAN_STACK_RIGHT       0xF3
+#define KASAN_SHADOW_RESERVED   0xFF
+
+#define KASAN_HEAD_SIZE         32
+#define KASAN_TAIL_SIZE         32
+
+// BSD Macros
+#define roundup(x, y)           ((((x) + ((y) - 1)) / (y)) * (y))
+#define __predict_true(x)       __builtin_expect((x) != 0, 1)
+#define __predict_false(x)      __builtin_expect((x) != 0, 0)
 
 #define KASAN_MEM_TO_SHADOW(addr) \
-  (((addr) >> KASAN_SHADOW_SHIFT) + KASAN_SHADOW_MAPPING_OFFSET)
-#define KASAN_SHADOW_TO_MEM(shadow) \
-  (((shadow) - KASAN_SHADOW_MAPPING_OFFSET) << KASAN_SHADOW_SHIFT)
+  (((addr) >> KASAN_SHADOW_SCALE_SHIFT) + __asan_shadow_memory_dynamic_address)
+
+static bool kasan_enabled = false;
+static unsigned long kasan_fw_base;
+static unsigned long kasan_rw_offset;
+static unsigned long kasan_fw_size;
+unsigned long __asan_shadow_memory_dynamic_address; //shadow offset
+static unsigned long kasan_shadow_size;
+static unsigned long kasan_fw_start; //fw base + offset
+static unsigned long kasan_fw_end; //fw base + size
+
+#define ADDR_CROSSES_SCALE_BOUNDARY(addr, size) \
+    ((addr >> KASAN_SHADOW_SCALE_SHIFT) != ((addr + size - 1) >> KASAN_SHADOW_SCALE_SHIFT))
 
 __attribute__((no_sanitize("address")))
-void kasan_bug_report(unsigned long addr, size_t size,
-                      unsigned long buggy_shadow_address, uint8_t is_write,
-                      unsigned long ip);
+static inline int8_t *kasan_md_addr_to_shad(const void *addr) {
+    return (int8_t *)(((unsigned long)(addr) >> KASAN_SHADOW_SCALE_SHIFT) + __asan_shadow_memory_dynamic_address);
+}
 
 __attribute__((no_sanitize("address")))
-static inline unsigned long get_poisoned_shadow_address(unsigned long addr,
-                                                        size_t size) {
-  unsigned long addr_shadow_start = KASAN_MEM_TO_SHADOW(addr);
-  unsigned long addr_shadow_end = KASAN_MEM_TO_SHADOW(addr + size - 1) + 1;
-  unsigned long non_zero_shadow_addr = 0;
+static inline bool kasan_md_illegal(unsigned long addr, bool is_write) {
+    if (addr >= KASAN_SHADOW_MEMORY_START && addr < (KASAN_SHADOW_MEMORY_START + kasan_shadow_size)) 
+    return true;
 
-  for (unsigned long i = 0; i < addr_shadow_end - addr_shadow_start; i++) {
-    if (*(uint8_t *)(addr_shadow_start + i) != 0) {
-      non_zero_shadow_addr = addr_shadow_start + i;
-      break;
+    if (addr >= kasan_fw_base && addr < kasan_fw_start){
+        if (is_write) {
+            return true;
+        }
     }
-  }
+    
+    return false;
 
-  if (non_zero_shadow_addr) {
-    unsigned long last_byte = addr + size - 1;
-    s8 *last_shadow_byte = (s8 *)KASAN_MEM_TO_SHADOW(last_byte);
-
-    /* Non-zero bytes in shadow memory may indicate either:
-    *  1) invalid memory access (0xff, 0xfa, ...)
-    *  2) access to a 8-byte region which isn't entirely accessible, i.e. only
-    *     n bytes can be read/written in the 8-byte region, where n < 8
-    *     (in this case shadow byte encodes how much bytes in an 8-byte region
-    *     are accessible).
-    * Thus, if there is a non-zero shadow byte we need to check if it
-    * corresponds to the last byte in the checked region:
-    *   not last - OOB memory access
-    *   last - check if we don't access beyond what's encoded in the shadow byte.
-    */         
-    if (non_zero_shadow_addr != (unsigned long)last_shadow_byte || ((s8)(last_byte & KASAN_SHADOW_MASK) >= *last_shadow_byte)) // (((((addr_shadow_end - addr_shadow_start) + 1) * 8) - (7 - *last_shadow_byte)) < size))
-     { 
-      return non_zero_shadow_addr;
-     }
-  }
-
-  return 0;
 }
 
-// Both `address` and `size` must be 8-byte aligned.
+
 __attribute__((no_sanitize("address")))
-static void poison_shadow(unsigned long address, size_t size, uint8_t value) {
-  unsigned long shadow_start, shadow_end;
-  size_t shadow_length = 0;
+static inline bool kasan_md_unsupported(unsigned long addr) {
+    if (addr > kasan_fw_end) return true;
+    
+    if (addr < kasan_fw_base) return true;
 
-  shadow_start = KASAN_MEM_TO_SHADOW(address);
-  shadow_end = KASAN_MEM_TO_SHADOW(address + size - 1) + 1;
-  shadow_length = shadow_end - shadow_start;
-
-  sbi_memset((void *)shadow_start, value, shadow_length);
+    return false;
 }
 
-// `address` must be 8-byte aligned
-__attribute__((no_sanitize("address")))
-static void unpoison_shadow(unsigned long address, size_t size) {
-  poison_shadow(address, size & (~KASAN_SHADOW_MASK),
-                ASAN_SHADOW_UNPOISONED_MAGIC);
 
-  if (size & KASAN_SHADOW_MASK) {
-    uint8_t *shadow = (uint8_t *)KASAN_MEM_TO_SHADOW(address + size);
-    *shadow = size & KASAN_SHADOW_MASK;
-  }
+__attribute__((no_sanitize("address")))
+static inline const char *kasan_code_name(uint8_t code) {
+    switch (code) {
+    case KASAN_GENERIC_REDZONE: return "GenericRedZone";
+    case KASAN_MALLOC_REDZONE:  return "MallocRedZone";
+    case KASAN_HEAP_FREE:       return "UseAfterFree";
+    case 1 ... 7:               return "RedZonePartial";
+    case KASAN_STACK_LEFT:      return "StackLeft";
+    case KASAN_STACK_MID:       return "StackMiddle";
+    case KASAN_STACK_RIGHT:     return "StackRight";
+    default:                    return "Unknown";
+    }
 }
 
 __attribute__((no_sanitize("address")))
-static inline int kasan_check_memory(unsigned long addr, size_t size,
-                                     uint8_t write, unsigned long pc) {
-  unsigned long buggy_shadow_address;
-  if (size == 0) return 1;
+static void kasan_report(unsigned long addr, size_t size, bool write, unsigned long pc, uint8_t code) {
+    bool was_enabled = kasan_enabled;
+    kasan_enabled = false;
 
-  // there is 256 MB of RAM starting at 0x40000000
-  if (addr < TARGET_DRAM_START || addr > TARGET_DRAM_END) return 1;
-
-  buggy_shadow_address = get_poisoned_shadow_address(addr, size);
-  if (buggy_shadow_address == 0) return 1;
-
-  kasan_bug_report(addr, size, buggy_shadow_address, write, pc);
-  return 0;
+    sbi_printf("\n");
+    sbi_printf("ASan: Unauthorized Access In %p: Addr %p [%lu byte%s, %s, %s]\n",
+        (void *)pc, (void *)addr, (unsigned long)size, (size > 1 ? "s" : ""),
+        (write ? "write" : "read"), kasan_code_name(code));
+        
+    kasan_enabled = was_enabled;
 }
 
-// Implement necessary routines for KASan sanitization of globals.
 
-// See struct __asan_global definition at
-// https://github.com/llvm-mirror/compiler-rt/blob/master/lib/asan/asan_interface_internal.h.
-struct kasan_global_info {
-  // Starting address of the variable
-  const void *start;
-  // Variable size
-  size_t size;
-  // 32-bit aligned size of global including the redzone
-  size_t size_with_redzone;
-  // Symbol name
-  const void *name;
-  const void *module_name;
-  unsigned long has_dynamic_init;
-  void *location;
-  unsigned int odr_indicator;
+__attribute__((no_sanitize("address")))
+static inline bool kasan_shadow_1byte_isvalid(unsigned long addr, uint8_t *code) {
+    int8_t *byte = kasan_md_addr_to_shad((void *)addr);
+    int8_t last = (int8_t)((addr & KASAN_SHADOW_MASK) + 1);
+
+    if (__predict_true(*byte == 0 || last <= *byte)) {
+        return true;
+    }
+    *code = (uint8_t)*byte;
+    return false;
+}
+
+__attribute__((no_sanitize("address")))
+static inline bool kasan_shadow_2byte_isvalid(unsigned long addr, uint8_t *code) {
+    if (ADDR_CROSSES_SCALE_BOUNDARY(addr, 2)) {
+        return (kasan_shadow_1byte_isvalid(addr, code) && 
+                kasan_shadow_1byte_isvalid(addr+1, code));
+    }
+    int8_t *byte = kasan_md_addr_to_shad((void *)addr);
+    int8_t last = (int8_t)(((addr + 1) & KASAN_SHADOW_MASK) + 1);
+
+    if (__predict_true(*byte == 0 || last <= *byte)) {
+        return true;
+    }
+    *code = (uint8_t)*byte;
+    return false;
+}
+
+__attribute__((no_sanitize("address")))
+static inline bool kasan_shadow_4byte_isvalid(unsigned long addr, uint8_t *code) {
+    if (ADDR_CROSSES_SCALE_BOUNDARY(addr, 4)) {
+        return (kasan_shadow_2byte_isvalid(addr, code) && 
+                kasan_shadow_2byte_isvalid(addr+2, code));
+    }
+    int8_t *byte = kasan_md_addr_to_shad((void *)addr);
+    int8_t last = (int8_t)(((addr + 3) & KASAN_SHADOW_MASK) + 1);
+
+    if (__predict_true(*byte == 0 || last <= *byte)) {
+        return true;
+    }
+    *code = (uint8_t)*byte;
+    return false;
+}
+
+__attribute__((no_sanitize("address")))
+static inline bool kasan_shadow_8byte_isvalid(unsigned long addr, uint8_t *code) {
+    if (ADDR_CROSSES_SCALE_BOUNDARY(addr, 8)) {
+        return (kasan_shadow_4byte_isvalid(addr, code) && 
+                kasan_shadow_4byte_isvalid(addr+4, code));
+    }
+    int8_t *byte = kasan_md_addr_to_shad((void *)addr);
+    int8_t last = (int8_t)(((addr + 7) & KASAN_SHADOW_MASK) + 1);
+
+    if (__predict_true(*byte == 0 || last <= *byte)) {
+        return true;
+    }
+    *code = (uint8_t)*byte;
+    return false;
+}
+
+__attribute__((no_sanitize("address")))
+static inline bool kasan_shadow_Nbyte_isvalid(unsigned long addr, size_t size, uint8_t *code) {
+    size_t i;
+    for (i = 0; i < size; i++) {
+        if (!kasan_shadow_1byte_isvalid(addr+i, code)) return false;
+    }
+    return true;
+}
+
+__attribute__((no_sanitize("address")))
+void kasan_shadow_check(unsigned long addr, size_t size, bool write, unsigned long retaddr) {
+    uint8_t code = 0;
+    bool valid = true;
+
+    if (__predict_false(!kasan_enabled)) return;
+    if (__predict_false(size == 0)) return;
+    if (__predict_false(kasan_md_illegal(addr, write))) {
+        kasan_report(addr, size, write, retaddr, KASAN_SHADOW_RESERVED);
+        return;
+    }
+    if (__predict_false(kasan_md_unsupported(addr))) return;
+
+
+
+    if (__builtin_constant_p(size)) {
+        switch (size) {
+        case 1: valid = kasan_shadow_1byte_isvalid(addr, &code); break;
+        case 2: valid = kasan_shadow_2byte_isvalid(addr, &code); break;
+        case 4: valid = kasan_shadow_4byte_isvalid(addr, &code); break;
+        case 8: valid = kasan_shadow_8byte_isvalid(addr, &code); break;
+        default: valid = kasan_shadow_Nbyte_isvalid(addr, size, &code); break;
+        }
+    } else {
+        valid = kasan_shadow_Nbyte_isvalid(addr, size, &code);
+    }
+
+    if (__predict_false(!valid)) {
+        kasan_report(addr, size, write, retaddr, code);
+    }
+}
+
+__attribute__((no_sanitize("address")))
+static void kasan_shadow_Nbyte_fill(const void *addr, size_t size, uint8_t code)
+{
+    void *shad;
+
+    if (__predict_false(size == 0)) return;
+    if (__predict_false(kasan_md_unsupported((unsigned long)addr))) return;
+    
+    shad = (void *)kasan_md_addr_to_shad(addr);
+    size = size >> KASAN_SHADOW_SCALE_SHIFT;
+
+    _real_sbi_memset(shad, code, size);
+}
+
+__attribute__((no_sanitize("address")))
+static __always_inline void
+kasan_shadow_1byte_markvalid(unsigned long addr)
+{
+    int8_t *byte = kasan_md_addr_to_shad((void *)addr);
+    int8_t last = (addr & KASAN_SHADOW_MASK) + 1;
+
+    *byte = last;
+}
+
+__attribute__((no_sanitize("address")))
+static __always_inline void
+kasan_shadow_Nbyte_markvalid(const void *addr, size_t size)
+{
+    size_t i;
+    for (i = 0; i < size; i++) {
+        kasan_shadow_1byte_markvalid((unsigned long)addr + i);
+    }
+}
+
+/*
+ * In an area of size 'sz_with_redz', mark the 'size' first bytes as valid,
+ * and the rest as invalid. There are generally two use cases:
+ *
+ *  o kasan_mark(addr, origsize, size, code), with origsize < size. This marks
+ *    the redzone at the end of the buffer as invalid.
+ *
+ *  o kasan_mark(addr, size, size, 0). This marks the entire buffer as valid.
+ */
+
+ __attribute__((no_sanitize("address")))
+void kasan_mark(const void *addr, size_t size, size_t sz_with_redz, uint8_t code)
+{
+    size_t i, n, redz;
+    int8_t *shad;
+
+    if (kasan_md_unsupported((unsigned long)addr)) return;
+
+    redz = sz_with_redz - roundup(size, KASAN_SHADOW_SCALE_SIZE);
+    shad = kasan_md_addr_to_shad(addr);
+
+    /* Chunks of 8 bytes, valid. */
+    n = size / KASAN_SHADOW_SCALE_SIZE;
+    for (i = 0; i < n; i++) {
+        *shad++ = 0;
+    }
+
+    /* Possibly one chunk, mid. */
+    if ((size & KASAN_SHADOW_MASK) != 0) {
+        *shad++ = (size & KASAN_SHADOW_MASK);
+    }
+    
+    /* Chunks of 8 bytes, invalid. */
+    n = redz / KASAN_SHADOW_SCALE_SIZE;
+    for (i = 0; i < n; i++) {
+        *shad++ = code;
+    }
+}
+
+
+__attribute__((no_sanitize("address")))
+void kasan_md_init(struct sbi_scratch *scratch) 
+{
+    kasan_fw_base = scratch->fw_start;
+    kasan_rw_offset = scratch->fw_rw_offset;
+    kasan_fw_size = scratch->fw_size;
+    kasan_fw_start = kasan_fw_base + kasan_rw_offset;
+    kasan_fw_end = kasan_fw_base + kasan_fw_size;
+    __asan_shadow_memory_dynamic_address = KASAN_SHADOW_MEMORY_START - (kasan_fw_start >> KASAN_SHADOW_SCALE_SHIFT);
+    kasan_shadow_size = (kasan_fw_end - kasan_fw_start + 1) >> KASAN_SHADOW_SCALE_SHIFT;
+
+    _real_sbi_memset((void*)KASAN_SHADOW_MEMORY_START, 0, kasan_shadow_size);
+   
+    kasan_enabled = true;
+}
+
+__attribute__((no_sanitize("address")))
+void kasan_ctors(void)
+{
+    extern unsigned long __CTOR_LIST__, __CTOR_END__;
+    size_t nentries, i;
+    unsigned long *ptr;
+
+    nentries = ((size_t)&__CTOR_END__ - (size_t)&__CTOR_LIST__) / sizeof(unsigned long);
+
+    ptr = &__CTOR_LIST__;
+    for (i = 0; i < nentries; i++) {
+        void (*func)(void);
+        func = (void *)(*ptr);
+        (*func)();
+        ptr++;
+    }
+}
+
+
+#define DEFINE_ASAN_LOAD_STORE(size) \
+    __attribute__((no_sanitize("address"))) void __asan_load##size(unsigned long addr) { \
+        kasan_shadow_check(addr, size, false, __RET_ADDR); \
+    } \
+    __attribute__((no_sanitize("address"))) void __asan_load##size##_noabort(unsigned long addr) { \
+        kasan_shadow_check(addr, size, false, __RET_ADDR); \
+    } \
+    __attribute__((no_sanitize("address"))) void __asan_store##size(unsigned long addr) { \
+        kasan_shadow_check(addr, size, true, __RET_ADDR); \
+    } \
+    __attribute__((no_sanitize("address"))) void __asan_store##size##_noabort(unsigned long addr) { \
+        kasan_shadow_check(addr, size, true, __RET_ADDR); \
+    }
+
+DEFINE_ASAN_LOAD_STORE(1)
+DEFINE_ASAN_LOAD_STORE(2)
+DEFINE_ASAN_LOAD_STORE(4)
+DEFINE_ASAN_LOAD_STORE(8)
+DEFINE_ASAN_LOAD_STORE(16)
+
+__attribute__((no_sanitize("address"))) void __asan_loadN(unsigned long addr, size_t size) {
+    kasan_shadow_check(addr, size, false, __RET_ADDR);
+}
+__attribute__((no_sanitize("address"))) void __asan_loadN_noabort(unsigned long addr, size_t size) {
+    kasan_shadow_check(addr, size, false, __RET_ADDR);
+}
+__attribute__((no_sanitize("address"))) void __asan_storeN(unsigned long addr, size_t size) {
+    kasan_shadow_check(addr, size, true, __RET_ADDR);
+}
+__attribute__((no_sanitize("address"))) void __asan_storeN_noabort(unsigned long addr, size_t size) {
+    kasan_shadow_check(addr, size, true, __RET_ADDR);
+}
+__attribute__((no_sanitize("address"))) void __asan_handle_no_return(void) {}
+
+// 8. GLOBALS
+
+struct __asan_global {
+    const void *beg;
+    size_t size;
+    size_t size_with_redzone;
+    const void *name;
+    const void *module_name;
+    unsigned long has_dynamic_init;
+    void *location;
+    unsigned long odr_indicator;
 };
 
 __attribute__((no_sanitize("address")))
-static void asan_register_global(struct kasan_global_info *global) {
-  unpoison_shadow((unsigned long)global->start, global->size);
-
-  size_t aligned_size = (global->size + KASAN_SHADOW_MASK) & ~KASAN_SHADOW_MASK;
-  poison_shadow((unsigned long)global->start + aligned_size,
-                global->size_with_redzone - aligned_size,
-                ASAN_SHADOW_GLOBAL_REDZONE_MAGIC);
+void __asan_register_globals(struct __asan_global *globals, size_t n) {
+    size_t i;
+    for (i = 0; i < n; i++) {
+        kasan_mark(globals[i].beg, globals[i].size, 
+                   globals[i].size_with_redzone, KASAN_GENERIC_REDZONE);
+    }
 }
 
-void __asan_register_globals(struct kasan_global_info *globals, size_t size) {
-  for (size_t i = 0; i < size; i++) asan_register_global(&globals[i]);
+__attribute__((no_sanitize("address"))) 
+void __asan_unregister_globals(struct __asan_global *globals, size_t n) {
 }
 
-void __asan_unregister_globals(void *globals, size_t size) {}
-
-// Empty placeholder implementation to supress linker error for undefined symbol
-void __asan_handle_no_return(void) {}
-
-// KASan memcpy/memset hooks.
-
-__attribute__((no_sanitize("address")))
-void * __kasan_memcpy(void *dst, const void *src, size_t size,
-                     unsigned long pc){
-  kasan_check_memory((unsigned long)dst, size, /*is_write*/ true, pc);
-  kasan_check_memory((unsigned long)src, size, /*is_write*/ false, pc);
-
-  return _real_sbi_memcpy(dst, src, size); //added sbi_memcpy to the KASAN hook
-}
-
-__attribute__((no_sanitize("address")))
-void * __kasan_memset(void *buf, int c, size_t size, unsigned long pc)  {
-  kasan_check_memory((unsigned long)buf, size, /*is_write*/ true, pc);
-
-  return _real_sbi_memset(buf, c, size);  //added sbi_memset to the KASAN hook
-}
-
-// Implement KASan heap management hooks.
-
-struct KASAN_HEAP_HEADER {
-  unsigned int aligned_size;
-};
 
 __attribute__((no_sanitize("address")))
 void *kasan_malloc_hook(struct sbi_heap_control *hpctrl, size_t size) {
-  
-  struct KASAN_HEAP_HEADER *kasan_heap_hdr = NULL;
-  unsigned int algined_size = (size + KASAN_SHADOW_MASK) & (~KASAN_SHADOW_MASK);
-  unsigned int total_size = algined_size + KASAN_HEAP_HEAD_REDZONE_SIZE +
-                            KASAN_HEAP_TAIL_REDZONE_SIZE;
-  //allocating chunk with sbi_malloc_from
- 
-  void *ptr = sbi_malloc_from(hpctrl, total_size);    
-  if (ptr == NULL) return NULL;
+    size_t aligned_size;
+    size_t total_size;
+    size_t *size_ptr;
+    void *ptr;
+    void *user_ptr;
 
-  kasan_heap_hdr = (struct KASAN_HEAP_HEADER *)ptr;
-  kasan_heap_hdr->aligned_size = algined_size;
-  //shadow memory configuration
-  unpoison_shadow((unsigned long)(ptr + KASAN_HEAP_HEAD_REDZONE_SIZE), size);
-  poison_shadow((unsigned long)ptr, KASAN_HEAP_HEAD_REDZONE_SIZE,
-                ASAN_SHADOW_HEAP_HEAD_REDZONE_MAGIC);
-  poison_shadow(
-      (unsigned long)(ptr + KASAN_HEAP_HEAD_REDZONE_SIZE + algined_size),
-      KASAN_HEAP_TAIL_REDZONE_SIZE, ASAN_SHADOW_HEAP_TAIL_REDZONE_MAGIC);
+    if (size == 0)
+        return NULL;
 
-  return ptr + KASAN_HEAP_HEAD_REDZONE_SIZE;
+    aligned_size = roundup(size, KASAN_SHADOW_SCALE_SIZE);
+    total_size = sizeof(size_t) + KASAN_HEAD_SIZE + aligned_size + KASAN_TAIL_SIZE;
+    
+    ptr = sbi_malloc_from(hpctrl, total_size);
+    if (ptr == NULL)
+        return NULL;
+
+    size_ptr = (size_t *)ptr;
+    *size_ptr = total_size;
+    
+    user_ptr = (uint8_t *)ptr + sizeof(size_t) + KASAN_HEAD_SIZE;
+    
+    kasan_shadow_Nbyte_fill(ptr, sizeof(size_t) + KASAN_HEAD_SIZE,
+                            KASAN_MALLOC_REDZONE);
+    
+    kasan_mark(user_ptr, size, aligned_size + KASAN_TAIL_SIZE,
+               KASAN_MALLOC_REDZONE);
+
+    return user_ptr;
 }
 
 __attribute__((no_sanitize("address")))
 void kasan_free_hook(struct sbi_heap_control *hpctrl, void *ptr) {
-  struct KASAN_HEAP_HEADER *kasan_heap_hdr = NULL;
-  unsigned int aligned_size = 0;
+    void *real_ptr;
+    size_t *size_ptr;
+    size_t total_size;
+    size_t poison_size;
 
-  if (ptr == NULL) return;
+    if (ptr == NULL)
+        return;
 
-  kasan_heap_hdr =
-      (struct KASAN_HEAP_HEADER *)(ptr - KASAN_HEAP_HEAD_REDZONE_SIZE);
-  aligned_size = kasan_heap_hdr->aligned_size;
-
-  sbi_free_from(hpctrl, kasan_heap_hdr);
-  poison_shadow((unsigned long)ptr, aligned_size, ASAN_SHADOW_HEAP_FREE_MAGIC);
-
-  return;
+    real_ptr = (uint8_t *)ptr - (sizeof(size_t) + KASAN_HEAD_SIZE);
+    
+    size_ptr = (size_t *)real_ptr;
+    total_size = *size_ptr;
+    
+    sbi_free_from(hpctrl, real_ptr);
+    
+    poison_size = total_size - sizeof(size_t) - KASAN_HEAD_SIZE;
+    kasan_shadow_Nbyte_fill(ptr, poison_size, KASAN_HEAP_FREE);
 }
 
-// Implement KAsan error reporting routines.
-__attribute__((no_sanitize("address")))
-static void kasan_print_16_bytes_no_bug(const char *prefix,
-                                        unsigned long address) {
-  sbi_printf("%s0x%lX:", prefix, address);
-  for (int i = 0; i < 16; i++) sbi_printf(" %02X", *(uint8_t *)(address + i));
-  sbi_printf("\n");
-}
 
-__attribute__((no_sanitize("address")))
-static void kasan_print_16_bytes_with_bug(const char *prefix,
-                                          unsigned long address,
-                                          int buggy_offset) {
-  sbi_printf("%s0x%lX:", prefix, address);
-  for (int i = 0; i < buggy_offset; i++)
-    sbi_printf(" %02X", *(uint8_t *)(address + i));
-  sbi_printf("[%02X]", *(uint8_t *)(address + buggy_offset));
-  if (buggy_offset < 15)
-    sbi_printf("%02X", *(uint8_t *)(address + buggy_offset + 1));
-  for (int i = buggy_offset + 2; i < 16; i++)
-    sbi_printf(" %02X", *(uint8_t *)(address + i));
-  sbi_printf("\n");
-}
-
-__attribute__((no_sanitize("address")))
-static void kasan_print_shadow_memory(unsigned long address, int range_before,
-                                      int range_after) {
-  unsigned long shadow_address = KASAN_MEM_TO_SHADOW(address);
-  unsigned long aligned_shadow = shadow_address & 0xfffffff0;
-  int buggy_offset = shadow_address - aligned_shadow;
-
-  sbi_printf("[KASan] Shadow bytes around the buggy address 0x%lX (shadow 0x%lX):\n",
-         address, shadow_address);
-
-  for (int i = range_before; i > 0; i--) {
-    kasan_print_16_bytes_no_bug("[KASan]   ", aligned_shadow - i * 16);
-  }
-
-  kasan_print_16_bytes_with_bug("[KASan] =>", aligned_shadow, buggy_offset);
-
-  for (int i = 1; i <= range_after; i++) {
-    kasan_print_16_bytes_no_bug("[KASan]   ", aligned_shadow + i * 16);
-  }
-}
-
-void kasan_bug_report(unsigned long addr, size_t size,
-                      unsigned long buggy_shadow_address, uint8_t is_write,
-                      unsigned long ip) {
-  unsigned long buggy_address = KASAN_SHADOW_TO_MEM(buggy_shadow_address);
-  sbi_printf("[KASan] ===================================================\n");
-  sbi_printf(
-      "[KASan] ERROR: Invalid memory access: address 0x%lX, size 0x%lX, is_write "
-      "%d, ip 0x%lX\n",
-      addr, size, is_write, ip);
-
-  kasan_print_shadow_memory(buggy_address, 3, 3);
-}
-
-typedef void (*global_ctor)(void);
-
-
-void call_global_ctors(void) {
-  global_ctor *ctor = (global_ctor *)&__global_ctors_start;
-
-  while (ctor != (global_ctor *)&__global_ctors_end) {
-    (*ctor)();
-    ctor++;
-  }
-}
-
-void initialize_kasan(void) {
-  // Mark shadow memory region not accessible by the sanitized code.
-  poison_shadow(KASAN_SHADOW_MEMORY_START, KASAN_SHADOW_MEMORY_SIZE,
-                ASAN_SHADOW_RESERVED_MAGIC);
-}
-
-// Define KASan handlers exposed used by the compiler instrumentation.
-__attribute__((no_sanitize("address")))
-void __asan_loadN_noabort(unsigned int addr, unsigned int size) {
-  kasan_check_memory(addr, size, /*is_write*/ false, CALLER_PC);
-}
-
-__attribute__((no_sanitize("address")))
-void __asan_storeN_noabort(unsigned int addr, size_t size) {
-  kasan_check_memory(addr, size, /*is_write*/ true, CALLER_PC);
-}
-
-#define DEFINE_KASAN_LOAD_STORE_ROUTINES(size)                     \
-  void __asan_load##size##_noabort(unsigned long addr) {           \
-    kasan_check_memory(addr, size, /*is_write*/ false, CALLER_PC); \
-  }                                                                \
-  void __asan_store##size##_noabort(unsigned long addr) {          \
-    kasan_check_memory(addr, size, /*is_write*/ true, CALLER_PC);  \
-  }
-
-DEFINE_KASAN_LOAD_STORE_ROUTINES(1)
-DEFINE_KASAN_LOAD_STORE_ROUTINES(2)
-DEFINE_KASAN_LOAD_STORE_ROUTINES(4)
-DEFINE_KASAN_LOAD_STORE_ROUTINES(8)
-DEFINE_KASAN_LOAD_STORE_ROUTINES(16)
-
-// Local variable KASan instrumentation
-#define DEFINE_KASAN_SET_SHADOW_ROUTINE(byte)              \
+#define DEFINE_ASAN_SET_SHADOW(byte)                        \
   __attribute__((no_sanitize("address")))                   \
-  void __asan_set_shadow_##byte(void *addr, size_t size) { \
-    sbi_memset(addr, 0x##byte, size);                          \
+  void __asan_set_shadow_##byte(void *addr, size_t size) {  \
+    _real_sbi_memset(addr, 0x##byte, size);                 \
   }
 
-DEFINE_KASAN_SET_SHADOW_ROUTINE(00)  // addressable memory
-DEFINE_KASAN_SET_SHADOW_ROUTINE(f1)  // stack left redzone
-DEFINE_KASAN_SET_SHADOW_ROUTINE(f2)  // stack mid redzone
-DEFINE_KASAN_SET_SHADOW_ROUTINE(f3)  // stack right redzone
+DEFINE_ASAN_SET_SHADOW(00)
+DEFINE_ASAN_SET_SHADOW(f1)
+DEFINE_ASAN_SET_SHADOW(f2)
+DEFINE_ASAN_SET_SHADOW(f3)
+
+__attribute__((no_sanitize("address")))
+void __asan_poison_stack_memory(const void *addr, size_t size) {
+    size = roundup(size, KASAN_SHADOW_SCALE_SIZE);
+    kasan_shadow_Nbyte_fill(addr, size, KASAN_STACK_MID);
+}
+
+__attribute__((no_sanitize("address")))
+void __asan_unpoison_stack_memory(const void *addr, size_t size) {
+    kasan_shadow_Nbyte_markvalid(addr, size);
+}
+
+__attribute__((no_sanitize("address"))) 
+void kasan_init(struct sbi_scratch *scratch) {
+    kasan_md_init(scratch);
+    kasan_ctors();
+}
 
 #endif

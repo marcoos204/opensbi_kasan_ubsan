@@ -437,22 +437,37 @@ fw_platform_init:
 	/* Map implicit memcpy() added by compiler to sbi_memcpy() */
 	.section .text
 	.align 3
+#ifdef KASAN_ENABLED
+	.globl __asan_memcpy
+__asan_memcpy:
+#else
 	.weak memcpy
 memcpy:
+#endif
 	tail	sbi_memcpy
 
 	/* Map implicit memset() added by compiler to sbi_memset() */
 	.section .text
 	.align 3
+#ifdef KASAN_ENABLED
+	.globl __asan_memset
+__asan_memset:
+#else
 	.weak memset
 memset:
+#endif
 	tail	sbi_memset
 
 	/* Map implicit memmove() added by compiler to sbi_memmove() */
 	.section .text
 	.align 3
-	.globl memmove
+#ifdef KASAN_ENABLED
+	.globl __asan_memmove
+__asan_memmove:
+#else
+	.weak memmove
 memmove:
+#endif
 	tail	sbi_memmove
 
 	/* Map implicit memcmp() added by compiler to sbi_memcmp() */
