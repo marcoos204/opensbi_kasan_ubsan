@@ -455,6 +455,20 @@ else
 CFLAGS		+=	-O2
 endif
 
+ifeq ($(ENABLEUBSAN),y)
+UBSAN_CC_FLAGS := -fsanitize=undefined
+UBSAN_CC_FLAGS += -DUBSAN_ENABLED
+ifeq ($(ENABLEUBSANTESTS),y)
+UBSAN_CC_FLAGS += -DUBSAN_TESTS_ENABLED
+endif
+UBSAN_CC_FLAGS += -fno-sanitize=vptr
+UBSAN_CC_FLAGS += -fno-sanitize=float-cast-overflow
+UBSAN_CC_FLAGS += -fno-sanitize=float-divide-by-zero
+UBSAN_CC_FLAGS += -fsanitize-recover=undefined
+UBSAN_CC_FLAGS += -fsanitize=pointer-overflow
+CFLAGS += $(UBSAN_CC_FLAGS)
+endif
+
 ifeq ($(V), 1)
 ELFFLAGS	+=	-Wl,--print-gc-sections
 endif

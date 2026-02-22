@@ -35,6 +35,8 @@
 #include <sbi/sbi_tlb.h>
 #include <sbi/sbi_version.h>
 #include <sbi/sbi_unit_test.h>
+#include <sbi/sbi_ubsan_test.h>
+
 
 #define BANNER                                              \
 	"   ____                    _____ ____ _____\n"     \
@@ -287,6 +289,11 @@ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
 	sbi_boot_print_banner(scratch);
 
 	sbi_double_trap_init(scratch);
+
+	#ifdef UBSAN_TESTS_ENABLED
+	sbi_ubsan_test_suite();
+	#endif
+
 
 	rc = sbi_irqchip_init(scratch, true);
 	if (rc) {
